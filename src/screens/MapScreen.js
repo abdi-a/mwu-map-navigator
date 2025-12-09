@@ -1,15 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, View, Text, Dimensions, TextInput, Keyboard, TouchableOpacity, ScrollView, Linking, Platform, Alert } from 'react-native';
-import MapView, { Marker, Callout } from 'react-native-maps';
+import MapView, { Marker, Callout } from '../components/Map';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { locations } from '../data/locations';
+import { locations, REGION } from '../data/locations';
 
 const CATEGORIES = [
   { id: 'all', name: 'All', icon: 'map-marker-multiple' },
   { id: 'library', name: 'Libraries', icon: 'library' },
   { id: 'cafe', name: 'Cafes', icon: 'coffee' },
   { id: 'dorm', name: 'Dorms', icon: 'bed' },
+  { id: 'admin', name: 'Admin', icon: 'office-building' },
+  { id: 'clinic', name: 'Health', icon: 'hospital-box' },
+  { id: 'faculty', name: 'Colleges', icon: 'school' },
 ];
 
 export default function MapScreen() {
