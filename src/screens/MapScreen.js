@@ -17,14 +17,7 @@ const CATEGORIES = [
 
 const MAP_STYLE = [
   {
-    "featureType": "poi",
-    "elementType": "labels",
-    "stylers": [
-      { "visibility": "off" }
-    ]
-  },
-  {
-    "featureType": "transit",
+    "featureType": "all",
     "elementType": "labels",
     "stylers": [
       { "visibility": "off" }
@@ -34,7 +27,21 @@ const MAP_STYLE = [
     "featureType": "road",
     "elementType": "labels",
     "stylers": [
-      { "visibility": "on" }
+      { "visibility": "off" }
+    ]
+  },
+  {
+    "featureType": "administrative",
+    "elementType": "geometry",
+    "stylers": [
+      { "visibility": "off" }
+    ]
+  },
+  {
+    "featureType": "poi",
+    "elementType": "all",
+    "stylers": [
+      { "visibility": "off" }
     ]
   }
 ];
@@ -55,9 +62,39 @@ export default function MapScreen() {
   const [destinationTitle, setDestinationTitle] = useState('');
   const [isNavigationActive, setIsNavigationActive] = useState(false);
   const [autoNavigate, setAutoNavigate] = useState(false);
+  const [routeCoordinates, setRouteCoordinates] = useState([]);
 
   const toggleMapType = () => {
-    setMapType(current => current === 'standard' ? 'hybrid' : 'standard');
+    // Use 'satellite' instead of 'hybrid' to hide Google's default labels
+    setMapType(current => current === 'standard' ? 'satellite' : 'standard');
+  };
+
+  const fetchRoute = async (start, end) => {
+    if (!start || !end) return;
+    
+    try {
+      // Use OSRM (Open Source Routing Machine) public API
+      // It's free and doesn't require an API key for basic usage
+      const response = await fetch(
+        `http://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${end.longitude},${end.latitude}?overview=full&geometries=geojson`
+      );
+      const json = await response.json();
+
+      if (json.code === 'Ok' && json.routes.length > 0) {
+        const coordinates = json.routes[0].geometry.coordinates.map(coord => ({
+          latitude: coord[1],
+          longitude: coord[0],
+        }));
+        setRouteCoordinates(coordinates);
+      } else {
+        // Fallback to straight line if no road found
+        setRouteCoordinates([start, end]);
+      }
+    } catch (error) {
+      console.log("Error fetching route:", error);
+      // Fallback to straight line on error
+      setRouteCoordinates([start, end]);
+    }
   };
 
   const startNavigation = (location) => {
@@ -66,12 +103,22 @@ export default function MapScreen() {
     setIsNavigationActive(true);
     setSearchQuery(''); // Clear search to show all markers (like Main Gate)
     Keyboard.dismiss();
+
+    if (userLocation) {
+      fetchRoute(userLocation, location.coordinate);
+    } else {
+      // If we don't have user location yet, just set straight line for now
+      // It will update when user location is found if we add a watcher, 
+      // but for now let's just set the destination
+      setRouteCoordinates([]); 
+    }
   };
 
   const stopNavigation = () => {
     setDestination(null);
     setDestinationTitle('');
     setIsNavigationActive(false);
+    setRouteCoordinates([]);
   };
 
   const openExternalMaps = () => {
@@ -101,6 +148,16 @@ export default function MapScreen() {
   };
 
   useEffect(() => {
+    // Lock the map to MWU campus area
+    if (mapRef.current) {
+      mapRef.current.setMapBoundaries(
+        { latitude: 7.155, longitude: 40.010 }, // NorthEast
+        { latitude: 7.130, longitude: 39.985 }  // SouthWest
+      );
+    }
+  }, []);
+
+  useEffect(() => {
     (async () => {
       try {
         let { status } = await Location.requestForegroundPermissionsAsync();
@@ -122,6 +179,14 @@ export default function MapScreen() {
           },
           (location) => {
             setUserLocation(location.coords);
+            // If navigating, update the route from new position
+            if (isNavigationActive && destination) {
+               // Optional: Re-fetch route if moved significantly? 
+               // For now, let's not spam the API. The line will just start from the new user location 
+               // if we re-render, but we are using static routeCoordinates.
+               // To make it dynamic, we would need to call fetchRoute again.
+               // Let's keep it simple for the demo to avoid rate limits.
+            }
           }
         );
       } catch (error) {
@@ -287,9 +352,9 @@ export default function MapScreen() {
       >
         {userLocation && destination && isNavigationActive && (
           <Polyline
-            coordinates={[userLocation, destination]}
-            strokeColor="#4285F4"
-            strokeWidth={5}
+            coordinates={routeCoordinates.length > 0 ? routeCoordinates : [userLocation, destination]}
+            strokeColor="#1967D2"
+            strokeWidth={8}
           />
         )}
 
