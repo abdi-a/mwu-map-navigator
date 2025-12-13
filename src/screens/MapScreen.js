@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, Text, Dimensions, TextInput, Keyboard, TouchableOpacity, ScrollView, Linking, Platform, Alert } from 'react-native';
-import MapView, { Marker, Callout } from '../components/Map';
+import { StyleSheet, View, Text, Dimensions, TextInput, Keyboard, TouchableOpacity, ScrollView, Linking, Platform, Alert, Switch } from 'react-native';
+import MapView, { Marker, Callout, Polyline } from '../components/Map';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { locations, REGION } from '../data/locations';
@@ -15,10 +15,35 @@ const CATEGORIES = [
   { id: 'faculty', name: 'Colleges', icon: 'school' },
 ];
 
+const MAP_STYLE = [
+  {
+    "featureType": "poi",
+    "elementType": "labels",
+    "stylers": [
+      { "visibility": "off" }
+    ]
+  },
+  {
+    "featureType": "transit",
+    "elementType": "labels",
+    "stylers": [
+      { "visibility": "off" }
+    ]
+  },
+  {
+    "featureType": "road",
+    "elementType": "labels",
+    "stylers": [
+      { "visibility": "on" }
+    ]
+  }
+];
+
 export default function MapScreen() {
   const mapRef = useRef(null);
   const [userLocation, setUserLocation] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [mapType, setMapType] = useState('standard');
   const [region, setRegion] = useState({
     latitude: 7.143,
     longitude: 39.999,
@@ -26,6 +51,42 @@ export default function MapScreen() {
     longitudeDelta: 0.01,
   });
   const [searchQuery, setSearchQuery] = useState('');
+  const [destination, setDestination] = useState(null);
+  const [destinationTitle, setDestinationTitle] = useState('');
+  const [isNavigationActive, setIsNavigationActive] = useState(false);
+  const [autoNavigate, setAutoNavigate] = useState(false);
+
+  const toggleMapType = () => {
+    setMapType(current => current === 'standard' ? 'hybrid' : 'standard');
+  };
+
+  const startNavigation = (location) => {
+    setDestination(location.coordinate);
+    setDestinationTitle(location.title);
+    setIsNavigationActive(true);
+    setSearchQuery(''); // Clear search to show all markers (like Main Gate)
+    Keyboard.dismiss();
+  };
+
+  const stopNavigation = () => {
+    setDestination(null);
+    setDestinationTitle('');
+    setIsNavigationActive(false);
+  };
+
+  const openExternalMaps = () => {
+    if (!destination) return;
+    
+    const scheme = Platform.select({ ios: 'maps:', android: 'geo:' });
+    const latLng = `${destination.latitude},${destination.longitude}`;
+    const label = destinationTitle || "Destination";
+    const url = Platform.select({
+      ios: `${scheme}?q=${label}&ll=${latLng}`,
+      android: `${scheme}0,0?q=${latLng}(${label})`
+    });
+
+    Linking.openURL(url);
+  };
 
   const openDirections = (lat, lng, label) => {
     const scheme = Platform.select({ ios: 'maps:', android: 'geo:' });
@@ -115,20 +176,35 @@ export default function MapScreen() {
     if (filteredLocations.length > 0) {
       const location = filteredLocations[0];
       
-      // Debugging: Let the user know what we found
-      // Alert.alert("Found", `Zooming to ${location.title}`);
+      if (autoNavigate) {
+        startNavigation(location);
+        
+        // Also zoom to show the route
+        const { width, height } = Dimensions.get('window');
+        const ASPECT_RATIO = width / height;
+        const LATITUDE_DELTA = 0.01; // Zoom out a bit to see route
+        const LONGITUDE_DELTA = LATITUDE_DELTA * ASPECT_RATIO;
 
-      const { width, height } = Dimensions.get('window');
-      const ASPECT_RATIO = width / height;
-      const LATITUDE_DELTA = 0.002;
-      const LONGITUDE_DELTA = LATITUDE_DELTA * ASPECT_RATIO;
+        mapRef.current?.animateToRegion({
+          latitude: location.coordinate.latitude,
+          longitude: location.coordinate.longitude,
+          latitudeDelta: LATITUDE_DELTA,
+          longitudeDelta: LONGITUDE_DELTA,
+        }, 1000);
+      } else {
+        // Standard behavior: just zoom to location
+        const { width, height } = Dimensions.get('window');
+        const ASPECT_RATIO = width / height;
+        const LATITUDE_DELTA = 0.002;
+        const LONGITUDE_DELTA = LATITUDE_DELTA * ASPECT_RATIO;
 
-      mapRef.current?.animateToRegion({
-        latitude: location.coordinate.latitude,
-        longitude: location.coordinate.longitude,
-        latitudeDelta: LATITUDE_DELTA,
-        longitudeDelta: LONGITUDE_DELTA,
-      }, 1000);
+        mapRef.current?.animateToRegion({
+          latitude: location.coordinate.latitude,
+          longitude: location.coordinate.longitude,
+          latitudeDelta: LATITUDE_DELTA,
+          longitudeDelta: LONGITUDE_DELTA,
+        }, 1000);
+      }
       
       Keyboard.dismiss();
     }
@@ -147,6 +223,24 @@ export default function MapScreen() {
             returnKeyType="search"
             onSubmitEditing={handleSearch}
           />
+          <View style={styles.autoNavContainer}>
+            <Text style={styles.autoNavLabel}>Nav</Text>
+            <Switch
+              trackColor={{ false: "#767577", true: "#81b0ff" }}
+              thumbColor={autoNavigate ? "#2196F3" : "#f4f3f4"}
+              ios_backgroundColor="#3e3e3e"
+              onValueChange={setAutoNavigate}
+              value={autoNavigate}
+              style={{ transform: [{ scaleX: 0.7 }, { scaleY: 0.7 }] }}
+            />
+          </View>
+          <TouchableOpacity onPress={toggleMapType} style={styles.mapTypeButton}>
+            <MaterialCommunityIcons 
+              name={mapType === 'standard' ? 'satellite-variant' : 'map'} 
+              size={24} 
+              color="#666" 
+            />
+          </TouchableOpacity>
         </View>
         
         <ScrollView 
@@ -186,16 +280,34 @@ export default function MapScreen() {
         initialRegion={region}
         showsUserLocation={true}
         showsMyLocationButton={true}
+        mapType={mapType}
+        customMapStyle={MAP_STYLE}
+        minZoomLevel={15} // Restrict zooming out too far
+        maxZoomLevel={20}
       >
+        {userLocation && destination && isNavigationActive && (
+          <Polyline
+            coordinates={[userLocation, destination]}
+            strokeColor="#4285F4"
+            strokeWidth={5}
+          />
+        )}
+
         {filteredLocations.map((location) => (
           <Marker
             key={location.id}
             coordinate={location.coordinate}
+            onPress={() => {
+              if (!isNavigationActive) {
+                // Optional: Auto-select destination on tap?
+                // For now, we keep the callout behavior
+              }
+            }}
           >
             <View style={[styles.markerBubble, { backgroundColor: getMarkerColor(location.type) }]}>
               <MaterialCommunityIcons name={getMarkerIcon(location.type)} size={20} color="#fff" />
             </View>
-            <Callout onPress={() => openDirections(location.coordinate.latitude, location.coordinate.longitude, location.title)}>
+            <Callout onPress={() => startNavigation(location)}>
               <View style={styles.calloutContainer}>
                 <Text style={styles.calloutTitle}>{location.title}</Text>
                 <Text style={styles.calloutDescription}>{location.description}</Text>
@@ -210,7 +322,7 @@ export default function MapScreen() {
                   </Text>
                 )}
                 <View style={styles.directionsButton}>
-                  <Text style={styles.directionsText}>Get Directions</Text>
+                  <Text style={styles.directionsText}>START</Text>
                   <MaterialCommunityIcons name="navigation" size={14} color="#fff" />
                 </View>
               </View>
@@ -218,6 +330,29 @@ export default function MapScreen() {
           </Marker>
         ))}
       </MapView>
+
+      {isNavigationActive && (
+        <View style={styles.navigationPanel}>
+          <View style={styles.navContent}>
+            <View style={styles.navHeader}>
+              <MaterialCommunityIcons name="navigation" size={24} color="#4285F4" />
+              <View style={styles.navTextContainer}>
+                <Text style={styles.navTitle} numberOfLines={1}>To: {destinationTitle}</Text>
+                <Text style={styles.navSubText}>Follow the blue line</Text>
+              </View>
+            </View>
+            <View style={styles.navButtons}>
+              <TouchableOpacity style={styles.externalMapButton} onPress={openExternalMaps}>
+                <MaterialCommunityIcons name="google-maps" size={20} color="white" />
+                <Text style={styles.externalMapText}>Open Maps</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.stopButton} onPress={stopNavigation}>
+                <MaterialCommunityIcons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -226,6 +361,65 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+  },
+  navigationPanel: {
+    position: 'absolute',
+    bottom: 30,
+    left: 20,
+    right: 20,
+    backgroundColor: 'white',
+    borderRadius: 15,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    padding: 15,
+  },
+  navContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  navHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  navTextContainer: {
+    marginLeft: 10,
+    flex: 1,
+  },
+  navTitle: {
+    color: '#333',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  navSubText: {
+    color: '#666',
+    fontSize: 12,
+  },
+  navButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  externalMapButton: {
+    backgroundColor: '#4285F4',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  externalMapText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 12,
+    marginLeft: 5,
+  },
+  stopButton: {
+    padding: 5,
   },
   topContainer: {
     position: 'absolute',
@@ -241,15 +435,24 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 15,
     height: 50,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 5,
-    marginBottom: 10,
   },
   searchIcon: {
     marginRight: 10,
+  },
+  autoNavContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 5,
+  },
+  autoNavLabel: {
+    fontSize: 10,
+    color: '#666',
+    marginRight: 2,
+    fontWeight: 'bold',
+  },
+  mapTypeButton: {
+    padding: 5,
+    marginLeft: 5,
   },
   searchInput: {
     flex: 1,

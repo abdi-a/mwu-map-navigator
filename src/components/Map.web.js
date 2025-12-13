@@ -33,4 +33,5 @@ const styles = StyleSheet.create({
 
 export const Marker = () => null;
 export const Callout = () => null;
+export const Polyline = () => null;
 export default MapView;
